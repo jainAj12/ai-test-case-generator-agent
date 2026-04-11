@@ -10,7 +10,7 @@ from PIL import Image
 import io
 
 # --- 1. AI CONFIGURATION ---
-API_KEY = "AIzaSyC3mBp7l7dFg3fMlfTTxjV8agSXH-merv0"
+API_KEY = "AIzaSyBB3QEy8csYS7RTIj0Qk6Gs_BrVjYWDFkg"
 genai.configure(api_key=API_KEY)
 # Using the stable 2026 workhorse model
 model = genai.GenerativeModel('gemini-2.5-flash-lite')

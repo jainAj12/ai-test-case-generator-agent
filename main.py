@@ -9,18 +9,32 @@ import os
 from PIL import Image
 import io
 import re
+import qrcode
+import socket
 
 # --- 1. AI CONFIGURATION ---
-# Using the provided key
 API_KEY = "AIzaSyCmQF3w7UXpufXXDzZjxxWhopnkxiH3KZ0" 
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
-# --- 2. APP CONFIG ---
+# --- 2. NETWORK HELPER (For QR Code) ---
+def get_local_ip():
+    """Detects the local IP to allow mobile devices on the same Wi-Fi to connect."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('8.8.8.8', 1))
+        ip = s.getsockname()[0]
+    except Exception:
+        ip = '127.0.0.1'
+    finally:
+        s.close()
+    return ip
+
+# --- 3. APP CONFIG ---
 st.set_page_config(page_title="AI Test Case Agent", page_icon="🧪", layout="wide")
 st.title("🧪 Multimodal AI Test Case Generator")
 
-# --- 3. EXTRACTION LOGIC ---
+# --- 4. EXTRACTION LOGIC ---
 def extract_content(uploaded_file, url_input=None):
     try:
         if url_input:
@@ -51,141 +65,114 @@ def extract_content(uploaded_file, url_input=None):
     except Exception as e:
         return f"Error: {str(e)}", "error"
 
-# --- 4. ROBUST EXCEL CONVERSION HELPER ---
+# --- 5. ROBUST EXCEL CONVERSION ---
 def convert_md_to_excel(md_table_text):
     try:
-        # Clean lines and keep only those containing the table pipe '|'
+        # Filter lines to find the table rows
         lines = [line.strip() for line in md_table_text.split('\n') if '|' in line]
-        
         table_data = []
         for line in lines:
-            # Skip Markdown separator lines like |---|---|
+            # Skip separator lines |---|
             if re.match(r'^[\s|:-]+$', line):
                 continue
-            
-            # Split by | and clean whitespace
             row = [cell.strip() for cell in line.split('|')]
-            
-            # Handle leading/trailing empty strings from the pipes
             if row and not row[0]: row.pop(0)
             if row and not row[-1]: row.pop(-1)
-            
             if row:
                 table_data.append(row)
         
         if not table_data or len(table_data) < 2:
             return None
 
-        # Headers are the first row
         headers = table_data[0]
         rows = table_data[1:]
         
-        # Standardize row lengths to match headers
-        standardized_rows = []
-        for r in rows:
-            if len(r) > len(headers):
-                standardized_rows.append(r[:len(headers)])
-            elif len(r) < len(headers):
-                standardized_rows.append(r + [""] * (len(headers) - len(r)))
-            else:
-                standardized_rows.append(r)
-
-        df = pd.DataFrame(standardized_rows, columns=headers)
+        # Standardize row lengths
+        std_rows = [r[:len(headers)] if len(r) > len(headers) else r + [""]*(len(headers)-len(r)) for r in rows]
+        df = pd.DataFrame(std_rows, columns=headers)
         
-        # Convert to Excel Buffer with XlsxWriter for professional formatting
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             df.to_excel(writer, index=False, sheet_name='TestCases')
-            
-            workbook = writer.book
-            worksheet = writer.sheets['TestCases']
-            
-            # Add some styling
-            header_format = workbook.add_format({
-                'bold': True,
-                'bg_color': '#D7E4BC',
-                'border': 1
-            })
-            
-            for col_num, value in enumerate(df.columns.values):
-                worksheet.write(0, col_num, value, header_format)
-                # Auto-adjust column width (min 10, max 60)
-                column_len = max(df[value].astype(str).map(len).max(), len(value)) + 2
-                worksheet.set_column(col_num, col_num, min(max(column_len, 10), 60))
-        
+            workbook, worksheet = writer.book, writer.sheets['TestCases']
+            header_fmt = workbook.add_format({'bold': True, 'bg_color': '#D7E4BC', 'border': 1})
+            for i, col in enumerate(df.columns):
+                worksheet.write(0, i, col, header_fmt)
+                width = max(df[col].astype(str).map(len).max(), len(col)) + 2
+                worksheet.set_column(i, i, min(max(width, 10), 60))
         return output.getvalue()
-    except Exception as e:
-        st.error(f"Excel Conversion Logic Error: {e}")
+    except Exception:
         return None
 
-# --- 5. AI GENERATION LOGIC ---
+# --- 6. AI GENERATION ---
 def get_ai_test_cases(content, content_type):
     base_prompt = """
-    You are a Senior QA Automation Engineer. 
-    Analyze the requirements and create a professional, comprehensive test suite.
-    
-    CRITICAL OUTPUT RULE: 
-    Return ONLY a Markdown Table. Do not include any intro, outro, or conversation.
+    You are a Senior QA Automation Engineer. Create a comprehensive test suite.
+    OUTPUT RULE: Return ONLY a Markdown Table. No intro/outro conversation.
     Columns: | Test ID | Title | Priority | Steps | Expected Result | Type |
     """
     try:
         if content_type == "image":
             response = model.generate_content([base_prompt, content])
         else:
-            response = model.generate_content(f"{base_prompt}\n\nRequirements Content:\n{content}")
+            response = model.generate_content(f"{base_prompt}\n\nRequirements:\n{content}")
         return response.text
     except Exception as e:
         return f"AI Error: {str(e)}"
 
-# --- 6. UI SIDEBAR ---
+# --- 7. SIDEBAR (Settings + QR) ---
 with st.sidebar:
-    st.header("Settings")
+    st.header("⚙️ Settings")
     source_type = st.radio("Source Selection:", ["File Upload", "URL Link"])
-    uploaded_file = None
-    url_input = None
+    uploaded_file = st.file_uploader("Upload Document/Image", type=["pdf", "docx", "xlsx", "xls", "png", "jpg"]) if source_type == "File Upload" else None
+    url_input = st.text_input("Paste Requirement URL:") if source_type == "URL Link" else None
 
-    if source_type == "File Upload":
-        uploaded_file = st.file_uploader("Upload Image or Document", type=["pdf", "docx", "xlsx", "xls", "png", "jpg"])
-    else:
-        url_input = st.text_input("Paste Requirement URL:")
+    st.divider()
+    st.header("📱 Mobile Access")
+    ip = get_local_ip()
+    url = f"http://{ip}:8501"
+    qr_img = qrcode.make(url)
+    buf = io.BytesIO()
+    qr_img.save(buf, format="PNG")
+    st.image(buf, caption="Scan to use on Phone", use_container_width=True)
+    st.caption(f"Network URL: {url}")
 
-# --- 7. EXECUTION FLOW ---
+# --- 8. MAIN EXECUTION ---
 if st.button("Generate Test Suite 🚀"):
     if uploaded_file or url_input:
-        with st.spinner("Processing..."):
+        with st.spinner("Processing requirements..."):
             content, content_type = extract_content(uploaded_file, url_input)
             
         if content_type == "error":
             st.error(content)
         else:
-            # 1. Image/Content Preview
+            # 1. Preview
             st.divider()
             st.subheader("🖼️ Input Preview")
             if content_type == "image":
-                st.image(content, caption="Requirement Screenshot", use_container_width=True)
+                st.image(content, use_container_width=True)
             else:
-                with st.expander("View Extracted Text"):
+                with st.expander("View Text Content"):
                     st.text(content)
 
-            # 2. AI Generation & Table Display
+            # 2. Table
             st.divider()
             st.subheader("📊 AI Generated Test Case Table")
-            with st.spinner("Writing test cases..."):
-                test_suite_md = get_ai_test_cases(content, content_type)
-                st.markdown(test_suite_md)
+            with st.spinner("AI is thinking..."):
+                suite_md = get_ai_test_cases(content, content_type)
+                st.markdown(suite_md)
             
-            # 3. Conversion to Excel and Download
+            # 3. Excel Download
             st.divider()
-            excel_data = convert_md_to_excel(test_suite_md)
-            
-            if excel_data:
+            excel_bin = convert_md_to_excel(suite_md)
+            if excel_bin:
                 st.download_button(
                     label="📥 Download Test Suite (Excel)",
-                    data=excel_data,
+                    data=excel_bin,
                     file_name="QA_Test_Cases.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
             else:
-                st.error("Failed to parse the AI table into Excel. Please try clicking Generate again.")
+                st.error("Table parsing failed. Try generating again.")
     else:
-        st.warning("Please provide an input first.")
+        st.warning("Input required.")

@@ -8,8 +8,10 @@ import google.generativeai as genai
 import os
 from PIL import Image
 import io
+import re
 
 # --- 1. AI CONFIGURATION ---
+# Using the provided key
 API_KEY = "AIzaSyCmQF3w7UXpufXXDzZjxxWhopnkxiH3KZ0" 
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash-lite')
@@ -49,58 +51,88 @@ def extract_content(uploaded_file, url_input=None):
     except Exception as e:
         return f"Error: {str(e)}", "error"
 
-# --- 4. EXCEL CONVERSION HELPER ---
+# --- 4. ROBUST EXCEL CONVERSION HELPER ---
 def convert_md_to_excel(md_table_text):
     try:
-        # Split the text into lines and find the table part
+        # Clean lines and keep only those containing the table pipe '|'
         lines = [line.strip() for line in md_table_text.split('\n') if '|' in line]
         
-        # Remove the separator line (the one with ---|---|---)
-        valid_lines = [line for line in lines if not all(c in '|- ' for c in line)]
-        
-        # Parse into a list of lists
-        data = []
-        for line in valid_lines:
-            # Split by | and remove the empty strings from the start/end
-            row = [cell.strip() for cell in line.split('|') if cell.strip() != '']
+        table_data = []
+        for line in lines:
+            # Skip Markdown separator lines like |---|---|
+            if re.match(r'^[\s|:-]+$', line):
+                continue
+            
+            # Split by | and clean whitespace
+            row = [cell.strip() for cell in line.split('|')]
+            
+            # Handle leading/trailing empty strings from the pipes
+            if row and not row[0]: row.pop(0)
+            if row and not row[-1]: row.pop(-1)
+            
             if row:
-                data.append(row)
+                table_data.append(row)
         
-        if not data:
+        if not table_data or len(table_data) < 2:
             return None
 
-        # Create DataFrame
-        df = pd.DataFrame(data[1:], columns=data[0])
+        # Headers are the first row
+        headers = table_data[0]
+        rows = table_data[1:]
         
-        # Convert to Excel Buffer
+        # Standardize row lengths to match headers
+        standardized_rows = []
+        for r in rows:
+            if len(r) > len(headers):
+                standardized_rows.append(r[:len(headers)])
+            elif len(r) < len(headers):
+                standardized_rows.append(r + [""] * (len(headers) - len(r)))
+            else:
+                standardized_rows.append(r)
+
+        df = pd.DataFrame(standardized_rows, columns=headers)
+        
+        # Convert to Excel Buffer with XlsxWriter for professional formatting
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             df.to_excel(writer, index=False, sheet_name='TestCases')
-            # Auto-adjust column width
+            
+            workbook = writer.book
             worksheet = writer.sheets['TestCases']
-            for i, col in enumerate(df.columns):
-                column_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
-                worksheet.set_column(i, i, min(column_len, 50)) # Cap at 50
+            
+            # Add some styling
+            header_format = workbook.add_format({
+                'bold': True,
+                'bg_color': '#D7E4BC',
+                'border': 1
+            })
+            
+            for col_num, value in enumerate(df.columns.values):
+                worksheet.write(0, col_num, value, header_format)
+                # Auto-adjust column width (min 10, max 60)
+                column_len = max(df[value].astype(str).map(len).max(), len(value)) + 2
+                worksheet.set_column(col_num, col_num, min(max(column_len, 10), 60))
         
         return output.getvalue()
-    except Exception:
+    except Exception as e:
+        st.error(f"Excel Conversion Logic Error: {e}")
         return None
 
 # --- 5. AI GENERATION LOGIC ---
 def get_ai_test_cases(content, content_type):
     base_prompt = """
     You are a Senior QA Automation Engineer. 
-    Analyze the requirements and create a comprehensive test suite.
+    Analyze the requirements and create a professional, comprehensive test suite.
     
-    OUTPUT FORMAT: You MUST return a Markdown Table ONLY. 
-    Do not add conversational text before or after the table.
+    CRITICAL OUTPUT RULE: 
+    Return ONLY a Markdown Table. Do not include any intro, outro, or conversation.
     Columns: | Test ID | Title | Priority | Steps | Expected Result | Type |
     """
     try:
         if content_type == "image":
             response = model.generate_content([base_prompt, content])
         else:
-            response = model.generate_content(f"{base_prompt}\n\nRequirements:\n{content}")
+            response = model.generate_content(f"{base_prompt}\n\nRequirements Content:\n{content}")
         return response.text
     except Exception as e:
         return f"AI Error: {str(e)}"
@@ -150,10 +182,10 @@ if st.button("Generate Test Suite 🚀"):
                 st.download_button(
                     label="📥 Download Test Suite (Excel)",
                     data=excel_data,
-                    file_name="ai_test_cases.xlsx",
+                    file_name="QA_Test_Cases.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
             else:
-                st.error("Failed to convert table to Excel. Please try again.")
+                st.error("Failed to parse the AI table into Excel. Please try clicking Generate again.")
     else:
         st.warning("Please provide an input first.")

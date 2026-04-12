@@ -62,15 +62,16 @@ def extract_content(uploaded_file, url_input=None):
             final_text = "\n".join(full_text)
             return (final_text if final_text.strip() else "Error: Empty content detected."), "text"
         
-        # UPDATED EXCEL HANDLING
+        # EXCEL HANDLING
         elif name.endswith(('.xlsx', '.xls')):
-            # Select engine based on extension to avoid xlrd requirement for xlsx
+            uploaded_file.seek(0) # Ensure we start at the beginning of the file
             engine = 'xlrd' if name.endswith('.xls') else 'openpyxl'
-            df = pd.read_excel(uploaded_file, engine=engine)
-            
-            # Convert to CSV-style string for the AI to process easily
-            csv_data = df.to_csv(index=False)
-            return f"Excel Content ({name}):\n{csv_data}", "text"
+            try:
+                df = pd.read_excel(uploaded_file, engine=engine)
+            except Exception:
+                # Fallback: sometimes openpyxl handles weirdly formatted xlsx better
+                df = pd.read_excel(uploaded_file) 
+            return f"Excel Content:\n{df.to_csv(index=False)}", "text"
             
     except Exception as e:
         return f"Error: {str(e)}", "error"

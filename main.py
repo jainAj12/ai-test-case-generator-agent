@@ -13,7 +13,7 @@ import qrcode
 import socket
 
 # --- 1. AI CONFIGURATION ---
-API_KEY = "AIzaSyCmQF3w7UXpufXXDzZjxxWhopnkxiH3KZ0" 
+API_KEY = "AIzaSyAax-vTslEVjdVv2-SO0-ruq6r1p-DPWUw" 
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash-lite')
 

@@ -10,9 +10,9 @@ from PIL import Image
 import io
 
 # --- 1. AI CONFIGURATION ---
-API_KEY = "AIzaSyBB3QEy8csYS7RTIj0Qk6Gs_BrVjYWDFkg"
+# Best practice: Use st.secrets["GEMINI_API_KEY"] for deployment
+API_KEY = "AIzaSyA6_ZLXJN-DGv2W9ceT9yJ4jD5qE717gLY" 
 genai.configure(api_key=API_KEY)
-# Using the stable 2026 workhorse model
 model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
 # --- 2. APP CONFIG ---
@@ -20,9 +20,10 @@ st.set_page_config(page_title="AI Test Case Agent", page_icon="🧪", layout="wi
 st.title("🧪 Multimodal AI Test Case Generator")
 st.markdown("Upload PRDs, Screenshots, or Links to generate comprehensive test suites.")
 
-# --- 3. UPDATED EXTRACTION LOGIC ---
+# --- 3. EXTRACTION LOGIC ---
 def extract_content(uploaded_file, url_input=None):
     try:
+        # URL Logic
         if url_input:
             res = requests.get(url_input, timeout=10)
             res.raise_for_status()
@@ -38,39 +39,38 @@ def extract_content(uploaded_file, url_input=None):
             img = Image.open(uploaded_file)
             return img, "image"
             
-        # PDF HANDLING (Aggressive Markdown)
+        # PDF HANDLING
         elif name.endswith('.pdf'):
             with open("temp.pdf", "wb") as f:
                 f.write(uploaded_file.getbuffer())
-            # Use PyMuPDF4LLM for better structural extraction
             text = pymupdf4llm.to_markdown("temp.pdf")
             os.remove("temp.pdf")
             return text, "text"
         
-        # WORD HANDLING (Deep Table Search)
+        # WORD HANDLING
         elif name.endswith('.docx'):
             doc = Document(uploaded_file)
             full_text = []
-            
-            # 1. Check standard paragraphs
             for p in doc.paragraphs:
                 if p.text.strip():
                     full_text.append(p.text)
-            
-            # 2. Check Tables (Crucial for PRDs!)
             for table in doc.tables:
                 for row in table.rows:
                     row_data = [cell.text.strip() for cell in row.cells if cell.text.strip()]
                     if row_data:
                         full_text.append(" | ".join(row_data))
-            
             final_text = "\n".join(full_text)
             return (final_text if final_text.strip() else "Error: Empty content detected."), "text"
         
-        # EXCEL HANDLING
+        # UPDATED EXCEL HANDLING
         elif name.endswith(('.xlsx', '.xls')):
-            df = pd.read_excel(uploaded_file)
-            return "Excel Data:\n" + df.to_csv(index=False), "text"
+            # Select engine based on extension to avoid xlrd requirement for xlsx
+            engine = 'xlrd' if name.endswith('.xls') else 'openpyxl'
+            df = pd.read_excel(uploaded_file, engine=engine)
+            
+            # Convert to CSV-style string for the AI to process easily
+            csv_data = df.to_csv(index=False)
+            return f"Excel Content ({name}):\n{csv_data}", "text"
             
     except Exception as e:
         return f"Error: {str(e)}", "error"
@@ -79,8 +79,8 @@ def extract_content(uploaded_file, url_input=None):
 def get_ai_test_cases(content, content_type):
     base_prompt = """
     You are a Senior QA Automation Engineer. 
-    Analyze the provided requirements (Text or Image) and create a test suite.
-    Include: Functional, Negative, and Edge cases.
+    Analyze the provided requirements (Text, Excel Data, or Image) and create a professional test suite.
+    Include: Functional, Negative, Security, and Edge cases.
     
     Format:
     - **Test ID:** [ID]
@@ -91,10 +91,9 @@ def get_ai_test_cases(content, content_type):
     """
     try:
         if content_type == "image":
-            # Multi-modal call
             response = model.generate_content([base_prompt, content])
         else:
-            response = model.generate_content(f"{base_prompt}\n\nRequirements:\n{content}")
+            response = model.generate_content(f"{base_prompt}\n\nRequirements Content:\n{content}")
         return response.text
     except Exception as e:
         return f"AI Error: {str(e)}"
@@ -102,41 +101,51 @@ def get_ai_test_cases(content, content_type):
 # --- 5. UI LAYOUT ---
 with st.sidebar:
     st.header("Settings")
-    source_type = st.radio("Source:", ["File Upload", "URL Link"])
+    source_type = st.radio("Source Selection:", ["File Upload", "URL Link"])
     uploaded_file = None
     url_input = None
 
     if source_type == "File Upload":
         uploaded_file = st.file_uploader(
-            "Upload Doc (PDF/Docx) or UI Image (PNG/JPG)", 
-            type=["pdf", "docx", "xlsx", "png", "jpg", "jpeg"]
+            "Upload PRD (PDF/Docx), Test Data (Excel), or UI Mockup (PNG/JPG)", 
+            type=["pdf", "docx", "xlsx", "xls", "png", "jpg", "jpeg"]
         )
     else:
-        url_input = st.text_input("Paste URL:")
+        url_input = st.text_input("Paste Requirement URL (Confluence/Wiki):")
 
 # --- 6. EXECUTION ---
 if st.button("Generate Test Cases 🚀"):
     if uploaded_file or url_input:
-        with st.spinner("Processing..."):
+        with st.spinner("Extracting requirements..."):
             content, content_type = extract_content(uploaded_file, url_input)
             
         if content_type == "error":
-            st.error(content)
-        elif content_type == "text" and len(str(content)) < 10:
-            st.warning("⚠️ No readable text found. If this is a scanned PDF or a UI mockup, please save it as an IMAGE (PNG/JPG) and upload again!")
+            st.error(f"Failed to process file: {content}")
+            if "xlrd" in content:
+                st.info("💡 Run 'pip install xlrd' to support old .xls files.")
+        elif content_type == "text" and len(str(content)) < 15:
+            st.warning("⚠️ The extracted content seems too short. Please check your file.")
         else:
-            # Preview
-            if content_type == "image":
-                st.image(content, caption="Requirement Image", width=600)
-            else:
-                with st.expander("Show Extracted Text"):
-                    st.text(content)
+            # Layout for Preview and Results
+            col1, col2 = st.columns([1, 1])
             
-            # AI Call
-            with st.spinner("Writing Test Cases..."):
-                test_suite = get_ai_test_cases(content, content_type)
-                st.divider()
-                st.markdown(test_suite)
-                st.download_button("Download TXT", test_suite, file_name="test_cases.txt")
+            with col1:
+                st.subheader("Input Preview")
+                if content_type == "image":
+                    st.image(content, use_container_width=True)
+                else:
+                    st.text_area("Extracted Requirements", content, height=400)
+            
+            with col2:
+                st.subheader("AI Generated Test Suite")
+                with st.spinner("Writing test cases..."):
+                    test_suite = get_ai_test_cases(content, content_type)
+                    st.markdown(test_suite)
+                    st.download_button(
+                        label="Download Test Suite",
+                        data=test_suite,
+                        file_name="ai_generated_test_suite.txt",
+                        mime="text/plain"
+                    )
     else:
-        st.warning("Provide a file or link.")
+        st.warning("Please provide a file or a valid URL first.")

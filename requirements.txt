@@ -1,9 +1,10 @@
 streamlit
 pandas
+google-generativeai
+Pillow
 python-docx
 pymupdf4llm
 requests
 beautifulsoup4
-google-generativeai
-Pillow
+xlsxwriter
 openpyxl

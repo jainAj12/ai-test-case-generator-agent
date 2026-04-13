@@ -35,7 +35,7 @@ def configure_genai():
     current_key = API_KEYS[st.session_state.key_index]
     genai.configure(api_key=current_key)
     # Using Gemini 3 Flash for 2026 state-of-the-art performance
-    return genai.GenerativeModel('gemini-3-flash')
+    return genai.GenerativeModel('gemini-2.5-flash')
 
 # --- 3. EXTRACTION LOGIC ---
 def extract_content(uploaded_file, url_input=None):

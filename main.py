@@ -21,7 +21,7 @@ def configure_genai():
     
     genai.configure(api_key=API_KEY)
     # Using gemini-1.5-flash (Highest free tier quota: 15 RPM / 1500 RPD)
-    return genai.GenerativeModel('gemini-2.5-flash')
+    return genai.GenerativeModel('gemini-2.5-pro')
 
 # --- 2. APP CONFIG ---
 st.set_page_config(page_title="AI Test Case Agent", page_icon="🧪", layout="wide")

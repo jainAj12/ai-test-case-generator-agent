@@ -11,7 +11,7 @@ import io
 import re
 
 # --- 1. AI CONFIGURATION (SINGLE KEY MODE) ---
-API_KEY = "AIzaSyCJF7O6aOKrM2YsdU6zvoIVD1-0k0TbjBU" 
+API_KEY = "AIzaSyC1FMkabE5zTdrOnS019CSdZVgYcPVKla4" 
 
 def configure_genai():
     """Configures the Generative AI with a single fixed key."""

@@ -29,7 +29,7 @@ def configure_genai():
     current_key = API_KEYS[st.session_state.key_index]
     genai.configure(api_key=current_key)
     # Using gemini-1.5-flash for higher RPM/RPD quotas
-    return genai.GenerativeModel('gemini-1.5-flash-pro')
+    return genai.GenerativeModel('gemini-2.5-flash')
 
 # --- 2. APP CONFIG ---
 st.set_page_config(page_title="AI Test Case Agent", page_icon="🧪", layout="wide")
